@@ -1,5 +1,4 @@
 # 16S_QONT
-#IMPACT OF Ehrlichia ruminantium infection on the tissue-specific microbiome of Amblyomma gemma ticks 
 #Pipeline for processing 16S rRNA Nanopore sequencing data using QIIME2.
 ```
 ##Step0. merging the fastq files
