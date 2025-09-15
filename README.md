@@ -21,6 +21,7 @@ for d in barcode*; do
 done
 
 echo "all barcodes merged into $outdir"
+```
 
 ```
 ##Step01 quality check by nanoplot qc
