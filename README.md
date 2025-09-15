@@ -129,6 +129,18 @@ echo "Import completed."
 ```
 ##Step05. Dereplication
 **Script:** `05_derep.sh`
+uses QIIME2’s vsearch dereplicate-sequences to remove redundancy in the dataset by collapsing identical sequences.
+#!/bin/bash
+set -euo pipefail
+
+qiime vsearch dereplicate-sequences \
+  --i-sequences 4_single-end-demux.qza \
+  --o-dereplicated-table 5_derep-table.qza \
+  --o-dereplicated-sequences 5_derep-seqs.qza
+```
+```
+##Step06.summary visualization of dereplication outputs
+
 
 
 
