@@ -25,6 +25,7 @@ echo "all barcodes merged into $outdir"
 
 ```
 ##Step01 quality check by nanoplot qc
+**Script:** `01_nanoplot_qc.sh`  
 Runs NanoPlot to generate QC reports of the raw Nanopore reads
 #!/bin/bash
 set -euo pipefail
@@ -45,6 +46,25 @@ echo ">>> QC done. Results saved in $out_dir"
 ```
 ```
 ##Step02. Quality and length trimming
+**Script:** `02_QClengthTrim.sh`  
 Filters out low-quality and too-short/too-long reads.
+#!/bin/bash
+set -euo pipefail
 
+threads=4
+in_dir="/home/dochebet/16S_dataset/Q2_ONT/merged"
+out_dir="/home/dochebet/16S_dataset/Q2_ONT/2_QC" 
+mkdir -p "$out_dir"
+cd "$in_dir"
+
+for file in *.fastq.gz; do
+    base=$(basename "$file" .fastq.gz)
+    trimmomatic SE -threads $threads -phred33 \
+        "$file" "$out_dir/${base}_trimmed.fastq.gz" MINLEN:700 CROP:1500
+done
+```
+```
+##Step03.Primer Trimming
+**Script:** `03_PrimTrim.sh`
+  
 
