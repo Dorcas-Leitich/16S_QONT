@@ -140,6 +140,7 @@ qiime vsearch dereplicate-sequences \
 ```
 ```
 ##Step06.summary visualization of dereplication outputs
+**Script:** `06_derepsumV.sh`
 Generation summary visualizations of the dereplicated feature table and representative sequences.
 #!/bin/bash
 set -euo pipefail
@@ -152,7 +153,9 @@ qiime feature-table tabulate-seqs \
   --i-data 5_derep-seqs.qza \
   --o-visualization 5_derep-seqs.qzv
 ```
+```
 ##Step07.Chimera screening
+**Script:** `07_chimera_screening.sh`
 This script screens dereplicated sequences for chimeras using the SILVA reference database and removes erroneous sequences.
 #!/bin/bash
 set -euo pipefail 
@@ -198,6 +201,8 @@ else
 fi
 ```
 ```
+##step08. filtering non chimeras
+
 
 
 
