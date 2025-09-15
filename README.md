@@ -140,6 +140,19 @@ qiime vsearch dereplicate-sequences \
 ```
 ```
 ##Step06.summary visualization of dereplication outputs
+Generation summary visualizations of the dereplicated feature table and representative sequences.
+#!/bin/bash
+set -euo pipefail
+
+qiime feature-table summarize \
+  --i-table 5_derep-table.qza \
+  --o-visualization 5_derep-table.qzv
+
+qiime feature-table tabulate-seqs \
+  --i-data 5_derep-seqs.qza \
+  --o-visualization 5_derep-seqs.qzv
+```
+##Step07.Chimera screening
 
 
 
