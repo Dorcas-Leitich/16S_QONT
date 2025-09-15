@@ -42,7 +42,7 @@ NanoPlot --fastq "$merged_dir"/*.fastq.gz \
          --plots hex dot
 
 echo ">>> QC done. Results saved in $out_dir"
-
+```
 ```
 ##Step02. Quality and length trimming
 Filters out low-quality and too-short/too-long reads.
