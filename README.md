@@ -1,10 +1,11 @@
 # 16S_QONT
 Pipeline for processing 16S rRNA Nanopore sequencing data using QIIME2.
-Step0. merging the fastq files
+##Step0. merging the fastq files
 **Script:** `00_merge.sh`  
 Merges all `.fastq.gz` files from each `barcode*` directory into one per barcode.  
 Output files are saved in `QONT/merged/`
 
+```
 #!/bin/bash
 set -euo pipefail
 
@@ -22,9 +23,11 @@ for d in barcode*; do
 done
 
 echo "all barcodes merged into $outdir"
+```
 
-Step01 quality check by nanoplot qc
+##Step01 quality check by nanoplot qc
 Runs NanoPlot to generate QC reports of the raw Nanopore reads
+```
 #!/bin/bash
 set -euo pipefail
 
@@ -41,7 +44,9 @@ NanoPlot --fastq "$merged_dir"/*.fastq.gz \
          --plots hex dot
 
 echo ">>> QC done. Results saved in $out_dir"
-Step02. Quality and length trimming
+```
+
+##Step02. Quality and length trimming
 Filters out low-quality and too-short/too-long reads.
 
 
