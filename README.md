@@ -1,0 +1,391 @@
+# 16S_QONT
+#Pipeline for processing 16S rRNA Nanopore sequencing data using QIIME2.
+```
+##Step0. merging the fastq files
+**Script:** `00_merge.sh`  
+Merges all `.fastq.gz` files from each `barcode*` directory into one per barcode.  
+Output files are saved in `QONT/merged/`
+#!/bin/bash
+set -euo pipefail
+basedir="/home/dochebet/16S_dataset"
+outdir="$basedir/QONT/merged"
+mkdir -p "$outdir"
+
+cd "$basedir"
+
+for d in barcode*; do
+    [ -d "$d" ] || continue
+    outfile="$outdir/${d}_merged.fastq.gz"
+    cat "$d"/*.fastq.gz > "$outfile"
+    echo "merged $d -> $(basename "$outfile")"
+done
+
+echo "all barcodes merged into $outdir"
+```
+
+```
+##Step01 quality check by nanoplot qc
+**Script:** `01_nanoplot_qc.sh`  
+Runs NanoPlot to generate QC reports of the raw Nanopore reads
+#!/bin/bash
+set -euo pipefail
+
+merged_dir="/home/dochebet/16S_dataset/QONT/merged"
+out_dir="/home/dochebet/16S_dataset/QONT/qc_nanoplot"
+
+mkdir -p "$out_dir"
+
+echo ">>> Running NanoPlot QC on merged fastq files..."
+
+NanoPlot --fastq "$merged_dir"/*.fastq.gz \
+         --outdir "$out_dir" \
+         --threads 4 \
+         --plots hex dot
+
+echo ">>> QC done. Results saved in $out_dir"
+```
+```
+##Step02. Quality and length trimming
+**Script:** `02_QClengthTrim.sh`  
+Filters out low-quality and too-short/too-long reads.
+#!/bin/bash
+set -euo pipefail
+
+threads=4
+in_dir="/home/dochebet/16S_dataset/Q2_ONT/merged"
+out_dir="/home/dochebet/16S_dataset/Q2_ONT/2_QC" 
+mkdir -p "$out_dir"
+cd "$in_dir"
+
+for file in *.fastq.gz; do
+    base=$(basename "$file" .fastq.gz)
+    trimmomatic SE -threads $threads -phred33 \
+        "$file" "$out_dir/${base}_trimmed.fastq.gz" MINLEN:700 CROP:1500
+done
+```
+```
+##Step03.Primer Trimming
+**Script:** `03_PrimTrim.sh`
+This script removes primer sequences and filters reads by length/quality using Trimmomatic.
+#!/bin/bash
+set -euo pipefail
+
+threads=4
+in_dir="/home/dochebet/16S_dataset/Q2_ONT/2_QC"        
+out_dir="/home/dochebet/16S_dataset/Q2_ONT/3_primerTrimmed"
+mkdir -p "$out_dir"
+primers_fa="/home/dochebet/16S_dataset/Q2_ONT/adapters/primers.fa"
+echo "primer trimming with Trimmomatic"
+for file in "$in_dir"/*.fastq.gz; do
+    base=$(basename "$file" .fastq.gz)
+    echo "Processing $base"
+        trimmomatic SE \
+        -threads "$threads" \
+        -phred33 \
+        "$file" \
+        "$out_dir/${base}_primerTrimmed_temp.fastq.gz" \
+        ILLUMINACLIP:"$primers_fa":2:30:10 \
+        MINLEN:700 \
+        CROP:1500
+mv "$out_dir/${base}_primerTrimmed_temp.fastq.gz" "$out_dir/${base}_primerTrimmed.fastq.gz"
+
+    echo " Finished trimming $base"
+done
+```
+```
+##Step04.importing the quality checked and primertrimmed fastq files into qiime.
+**Script:** `04importq.sh`
+This script imports the primer-trimmed FASTQ files into QIIME2 and generates a summary visualization
+
+#!/bin/bash
+set -euo pipefail
+
+in_dir="3_primerTrimmed"
+
+echo "Looking for input files in $in_dir ..."
+if [ -d "$in_dir" ]; then
+    echo "Using '$in_dir' folder to import single-end reads ..."
+    qiime tools import \
+        --type 'SampleData[SequencesWithQuality]' \
+        --input-path "$in_dir" \
+        --input-format CasavaOneEightSingleLanePerSampleDirFmt \
+        --output-path 4_single-end-demux.qza
+else
+    echo "Input directory not found: $in_dir"
+    exit 1
+fi
+
+if [ -f "4_single-end-demux.qza" ]; then
+    qiime demux summarize \
+        --i-data 4_single-end-demux.qza \
+        --o-visualization 4_single-end-demux.qzv
+else
+    echo "Reads failed to import!"
+    exit 1
+fi
+
+echo "Import completed."
+```
+```
+##Step05. Dereplication
+**Script:** `05_derep.sh`
+uses QIIME2’s vsearch dereplicate-sequences to remove redundancy in the dataset by collapsing identical sequences.
+#!/bin/bash
+set -euo pipefail
+
+qiime vsearch dereplicate-sequences \
+  --i-sequences 4_single-end-demux.qza \
+  --o-dereplicated-table 5_derep-table.qza \
+  --o-dereplicated-sequences 5_derep-seqs.qza
+```
+```
+##Step06.summary visualization of dereplication outputs
+**Script:** `06_derepsumV.sh`
+Generation summary visualizations of the dereplicated feature table and representative sequences.
+#!/bin/bash
+set -euo pipefail
+
+qiime feature-table summarize \
+  --i-table 5_derep-table.qza \
+  --o-visualization 5_derep-table.qzv
+
+qiime feature-table tabulate-seqs \
+  --i-data 5_derep-seqs.qza \
+  --o-visualization 5_derep-seqs.qzv
+```
+```
+##Step07.Chimera screening
+**Script:** `07_chimera_screening.sh`
+This script screens dereplicated sequences for chimeras using the SILVA reference database and removes erroneous sequences.
+#!/bin/bash
+set -euo pipefail 
+
+# Input files
+DEREP_TABLE="5_derep-table.qza"
+DEREP_SEQS="5_derep-seqs.qza"
+REFERENCE_SEQS="ref/silva-138-99-seqs.qza"    
+THREADS=8
+
+# Output directory
+OUT_DIR="7_chimera-ref-out"
+
+echo ""
+echo "" 
+echo "  Screening for chimeric sequences"  
+
+qiime vsearch uchime-ref \
+  --i-table $DEREP_TABLE \
+  --i-sequences $DEREP_SEQS \
+  --i-reference-sequences $REFERENCE_SEQS \
+  --p-threads $THREADS \
+  --output-dir $OUT_DIR
+
+if [ -d "$OUT_DIR" ]; then
+  echo ""
+  echo "Chimeric sequences detected and mapped!" 
+  echo ""
+  echo "" 
+  echo " Visualizing chimera statistics"  
+
+  qiime metadata tabulate \
+    --m-input-file $OUT_DIR/stats.qza \
+    --o-visualization $OUT_DIR/stats.qzv
+
+  echo ""
+  echo "Chimera screening complete!" 
+  echo "   Results saved in: $OUT_DIR"
+else
+  echo ""
+  echo " FAILED to detect or map chimeric sequences!" 
+  exit 1
+fi
+```
+```
+##step08. filtering non chimeras
+**Script:** `08_filter_nonchimeras.sh`
+Removing all chimeric sequences flagged and keeping non-chimeric features for downstream analysis.
+#!/bin/bash
+set -euo pipefail
+
+# Filtering out chimeric sequences and features
+echo ""
+echo "Filtering chimeric sequences..."
+
+qiime feature-table filter-features \
+  --i-table 5_derep-table.qza \
+  --m-metadata-file 7_chimera-ref-out/nonchimeras.qza \
+  --o-filtered-table 7_chimera-ref-out/table-nonchimeric.qza
+
+qiime feature-table filter-seqs \
+  --i-data 5_derep-seqs.qza \
+  --m-metadata-file 7_chimera-ref-out/nonchimeras.qza \
+  --o-filtered-data 7_chimera-ref-out/rep-seqs-nonchimeric.qza
+
+if [ -f "7_chimera-ref-out/rep-seqs-nonchimeric.qza" ]; then
+  echo "Chimeric sequences successfully filtered!" 
+  echo ""
+  echo "Visualizing non-chimeric data..."
+
+  qiime feature-table summarize \
+    --i-table 7_chimera-ref-out/table-nonchimeric.qza \
+    --o-visualization 7_chimera-ref-out/table-nonchimeric.qzv
+else
+  echo "FAILED to filter out chimeric sequences!" 
+fi
+```
+```
+##Step09. OTU clustering
+**Script:** `09_otu_cluster.sh`
+Grouping similar sequences into Operational Taxonomic Units (OTUs) at 85% similarity, reducing redundancy and preparing it for taxonomy assignment.
+#!/bin/bash
+set -euo pipefail
+
+echo ""
+echo "OTU clustering at 85%"
+
+OUT_DIR="9_otu-cluster"
+mkdir -p $OUT_DIR
+
+qiime vsearch cluster-features-de-novo \
+  --i-table 7_chimera-ref-out/table-nonchimeric.qza \
+  --i-sequences 7_chimera-ref-out/rep-seqs-nonchimeric.qza \
+  --p-perc-identity 0.85 \
+  --p-threads 8 \
+  --o-clustered-table $OUT_DIR/table-op_ref-85.qza \
+  --o-clustered-sequences $OUT_DIR/rep-seqs-op_ref-85.qza
+```
+```
+##Step10. Taxonomic Assignment
+**Script:** `10_taxonomicAssignment.sh`
+Assigning taxonomy to the representative OTU sequences using a classifier trained on the SILVA 138 database.
+#!/bin/bash
+set -euo pipefail
+
+echo ""
+echo "Assigning taxonomy..."
+echo ""
+
+# Input classifier and representative sequences
+CLASSIFIER="ref/silva-138-99-nb-classifier.qza"
+REP_SEQS="9_otu-cluster/rep-seqs-op_ref-85.qza"
+
+# Output 
+OUT_DIR="10_taxonomy"
+THREADS=8   # adjust based on available CPUs
+mkdir -p "${OUT_DIR}"
+
+# Assign taxonomy
+qiime feature-classifier classify-sklearn \
+  --i-classifier "${CLASSIFIER}" \
+  --i-reads "${REP_SEQS}" \
+  --p-reads-per-batch 5000 \
+  --p-n-jobs "${THREADS}" \
+  --o-classification "${OUT_DIR}/taxonomy-sklearn.qza"
+
+# Check if output file was created
+if [ -f "${OUT_DIR}/taxonomy-sklearn.qza" ]; then
+  echo "Taxonomy successfully assigned"
+else 
+  echo "Taxonomy FAILED!"
+  exit 1
+fi
+```
+```
+##Step11. Exporting Files
+**Script:** `11_exportfiles.sh`
+Exporting the main QIIME 2 artifacts into standard formats BIOM, TSV, FASTA so that the results are used in downstream analyses outside QIIME 2,R 
+#!/bin/bash
+set -euo pipefail
+
+# Make export directory
+mkdir -p exported
+
+# Export OTU table
+echo "Exporting OTU table (table-op_ref-85.qza) to biom..."
+qiime tools export \
+  --input-path 9_otu-cluster/table-op_ref-85.qza \
+  --output-path exported/
+if [ -f "exported/feature-table.biom" ]; then
+  echo "Biom file successfully exported"
+else
+  echo "Biom file FAILED TO EXPORT"
+fi
+
+# Export taxonomy
+echo ""
+echo "Exporting taxonomy (taxonomy-sklearn.qza) to taxonomy.tsv..."
+qiime tools export \
+  --input-path 10_taxonomy/taxonomy-sklearn.qza \
+  --output-path exported/
+if [ -f "exported/taxonomy.tsv" ]; then
+  echo "Taxonomy file successfully exported"
+else
+  echo "Taxonomy file FAILED TO EXPORT"
+fi
+
+# Export representative sequences
+echo ""
+echo "Exporting representative sequences (rep-seqs-op_ref-85.qza) to fasta..."
+qiime tools export \
+  --input-path 9_otu-cluster/rep-seqs-op_ref-85.qza \
+  --output-path exported/
+if [ -f "exported/dna-sequences.fasta" ]; then
+  echo "Fasta file successfully exported"
+else
+  echo "Fasta file FAILED TO EXPORT"
+fi
+
+echo ""
+echo " Export completed!"
+```
+```
+##Step12.fixeing the taxonomy file so Phyloseq can read it
+**Script:** `12_addTaxonomy_Biom.sh`
+#!/bin/bash
+set -euo pipefail
+
+# Fix taxonomy header for Phyloseq
+if [ -f "exported/taxonomy.tsv" ]; then
+  echo "Fixing taxonomy header for Phyloseq compatibility..."
+  sed -i -e 's/Feature ID/#OTUID/g; s/Taxon/taxonomy/g; s/Confidence/confidence/g' exported/taxonomy.tsv
+  echo "Taxonomy header fixed"
+else
+  echo "taxonomy.tsv not found!"
+  exit 1
+fi
+
+# Add taxonomy to BIOM file
+if [ -f "exported/feature-table.biom" ]; then
+  echo "Adding taxonomy metadata to BIOM file..."
+  biom add-metadata \
+    -i exported/feature-table.biom \
+    -o exported/table-with-taxonomy.biom \
+    --observation-metadata-fp exported/taxonomy.tsv \
+    --sc-separated taxonomy
+
+  if [ -f "exported/table-with-taxonomy.biom" ]; then
+    echo "BIOM file with taxonomy successfully generated: exported/table-with-taxonomy.biom"
+  else
+    echo "Failed to generate BIOM file with taxonomy"
+    exit 1
+  fi
+else
+  echo "feature-table.biom not found!"
+  exit 1
+fi
+
+echo ""
+echo "taxonomy formatted and added to BIOM file!"
+```
+
+
+
+
+
+
+
+
+
+
+  
+
